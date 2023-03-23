@@ -21,7 +21,7 @@ typedef struct ext2_dir_entry_2 DIR;
 
 char buf[BLKSIZE], gbuf[BLKSIZE];
 
-int indbuf[256], dbuf[256];
+int ibuf[256], dbuf[256];
 
 char *name[64];
 char gpath[256];
@@ -37,6 +37,8 @@ int dev;
 int ino;
 int imap, bmap, inodes_start; 
 int n, ninodes, nblocks;
+
+const char *disk = "diskimage";
 
 int get_block(int dev, int blk, char *buf)
 {
@@ -64,67 +66,7 @@ int tokenize(char *pathname)
   return n;
 }
 
-int show_dir(INODE *ip)
-{
-   char sbuf[BLKSIZE], temp[256];
-   DIR *dp;
-   char *cp;
- 
-   // ASSUME only one data block i_block[0]
-   // YOU SHOULD print i_block[0] number to see its value
-   get_block(dev, ip->i_block[0], sbuf);
-
-   dp = (DIR *)sbuf;
-   cp = sbuf;
- 
-   while(cp < sbuf + BLKSIZE){
-       strncpy(temp, dp->name, dp->name_len);
-       temp[dp->name_len] = 0;  // convert dp->name into a string
-      
-       printf("%8d%8d%8u       %s\n", dp->inode, dp->rec_len, dp->name_len, temp);
-
-       cp += dp->rec_len;      // advance cp by rec_len
-       dp = (DIR *)cp;         // pull dp to cp
-   }
-}
-
-int search(INODE *ip, char *name)
-{
-   int i;
-   char *cp, sbuf[BLKSIZE], temp[256];
-   DIR *dp;
-
-   printf("search for %s in INODE ino=%d at %x\n", name, ino, ip);
-
-   for (i=0; i<12; i++){
-        if (ip->i_block[i] == 0) 
-           return 0;
-        printf("i=%d  i_block[%d]=%d\n", i, i, ip->i_block[i]);
-
-        get_block(dev, ip->i_block[i], sbuf);
-        dp = (DIR *)sbuf;
-        cp = sbuf;
-        printf(" i_number  rec_len  name_len    name\n");
-
-        while(cp < sbuf + BLKSIZE){
-
-	    strncpy(temp, dp->name, dp->name_len);
-            temp[dp->name_len] = 0;
-            printf("%8d%8d%8d        %s\n", dp->inode, dp->rec_len, dp->name_len, temp);
-
-            if (strcmp(name, temp)==0){
-                printf("found %s : ino = %d\n", name, dp->inode);
-                return(dp->inode);
-            }
-
-            cp += dp->rec_len;
-            dp = (DIR *)cp;
-        }
-   }
-   return(0);
-}
-
-INODE *iget(int dev, int ino)
+INODE *findinode(int dev, int ino)
 {
   INODE *ip;  
   int blk, offset;
@@ -138,7 +80,59 @@ INODE *iget(int dev, int ino)
   return ip;
 }
 
-char *disk = "diskimage";
+int show_dir(INODE *ip)
+{
+  char sbuf[BLKSIZE], temp[256];
+  DIR *dp;
+  char *cp;
+ 
+  // ASSUME only one data block i_block[0]
+  // YOU SHOULD print i_block[0] number to see its value
+  get_block(dev, ip->i_block[0], sbuf);
+
+  dp = (DIR *)sbuf;
+  cp = sbuf;
+ 
+  while(cp < sbuf + BLKSIZE){
+    strncpy(temp, dp->name, dp->name_len);
+    temp[dp->name_len] = 0;  // convert dp->name into a string  
+
+    printf("%8d%8d%8u       %s\n", dp->inode, dp->rec_len, dp->name_len, temp);
+
+    cp += dp->rec_len;      // advance cp by rec_len
+    dp = (DIR *)cp;         // pull dp to cp
+   }
+}
+
+int search(INODE *ip, char *name)
+{
+  char sbuf[BLKSIZE], temp[256];
+  DIR *dp;
+  char *cp;
+ 
+  // ASSUME only one data block i_block[0]
+  // YOU SHOULD print i_block[0] number to see its value
+  get_block(dev, ip->i_block[0], sbuf);
+
+  dp = (DIR *)sbuf;
+  cp = sbuf;
+ 
+  while(cp < sbuf + BLKSIZE){
+    strncpy(temp, dp->name, dp->name_len);
+    temp[dp->name_len] = 0;  // convert dp->name into a string
+      
+    printf("%8d%8d%8u       %s\n", dp->inode, dp->rec_len, dp->name_len, temp);
+
+    if (!strcmp(temp, name)){
+      printf("found %s : ino = %d\n", dp->name, dp->inode);
+      return dp->inode;
+    }
+    cp += dp->rec_len;      // advance cp by rec_len
+    dp = (DIR *)cp;         // pull dp to cp
+   }
+
+   return(0);
+}
 
 int main(int argc, char *argv[])
 {
@@ -184,7 +178,7 @@ int main(int argc, char *argv[])
 
   get_block(dev, inodes_start, buf);
   ip = (INODE *)buf + 1;
-  ip = iget(dev, 2);
+  ip = findinode(dev, 2);
 
   printf("(3). Show root DIR contents\n");
   printf("root inode data block = %d\n", ip->i_block[0]);
@@ -205,12 +199,12 @@ int main(int argc, char *argv[])
   getchar();
 
   ino = 2;
-  ip = iget(dev, 2);
+  ip = findinode(dev, 2);
 
   for (i=0; i<n; i++){
     ino = search(ip, name[i]);
     if (ino == 0){
-      printf("can't find %s\n", name[i]);
+      printf("%s not found\n", name[i]);
       exit(1);
     }
 
@@ -221,15 +215,14 @@ int main(int argc, char *argv[])
   }
 
   printf("get INODE of ino=%d\n", ino);
-  ip = iget(dev, ino);
+  ip = findinode(dev, ino);
 
   printf("file size = %d bytes\n", ip->i_size);
-  printf("All disk block numbers in INODE:\n");
-  for (i=0; i<15; i++){
+  printf("All disk block numbers in INODE: \n");
+  for (i=0; i<15; i++)
     printf("i_block[%d] = %d\n", i, ip->i_block[i]);
-  }
-
-  printf("enter a key to continue");
+  
+  printf("enter a key to continue ");
   getchar();
   printf("----------- DIRECT BLOCKS ----------------\n");
   for (i=0; i<12; i++){
@@ -241,10 +234,12 @@ int main(int argc, char *argv[])
   
   if (ip->i_block[12]){
     printf("----------- INDIRECT BLOCKS ---------------\n");
-    get_block(dev, ip->i_block[12], (char *)indbuf);
-    for (i=0; i<256; i++){
-      if (indbuf[i])
-	printf("%d ", indbuf[i]);
+    get_block(dev, ip->i_block[12], (char *)ibuf);
+
+    i = 0;
+    while(ibuf[i] && i < 256){
+      printf("%d ", ibuf[i]);
+      i++;
     }
   }
   printf("\n");
@@ -253,19 +248,21 @@ int main(int argc, char *argv[])
     get_block(dev, ip->i_block[13], (char *)dbuf);
     printf("----------- DOUBLE INDIRECT BLOCKS ---------------\n");
 
-    for (i=0; i<256; i++){
-      if (dbuf[i] == 0)
-         break;
-      get_block(dev, dbuf[i], (char *)indbuf);
-      for (j=0; j<256; j++){
-	if (indbuf[j] == 0)
-	  break;
-        printf("%d ", indbuf[j]);
+
+    i = 0;
+    while(ibuf[i] && i < 256){
+      get_block(dev, dbuf[i], (char *)ibuf);
+      
+      j = 0;
+      while(ibuf[j] && j < 256){
+        printf("%d ", ibuf[j]);
+        j++;
       }
+      i++;
     }
   }
-  printf("\n");
 
+  printf("\n");
 }
 
 
